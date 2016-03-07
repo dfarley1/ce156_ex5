@@ -19,6 +19,7 @@
 #include <signal.h>
 #include <netdb.h>
 #include <time.h>
+#include <math.h>
 
 #define LISTENQ 1024
 #define MAXLINE 4096

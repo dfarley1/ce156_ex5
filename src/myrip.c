@@ -1,11 +1,287 @@
 /*
  * Daniel Farley - dfarley@ucsc.edu
- * CE 156 - Programing Assignment 4
- * Usage: ./myproxy <local_port>
+ * CE 156 - Programing Assignment 5
+ * Usage: ./myrip <node.config> <neightbor.config> <local_port>
  */
 
 #include "myunp.h"
 
+#define UPDATE_INTERVAL 10
+#define DEAD_ROUTE 40
+#define MAX_DISTANCE 100
+
+typedef struct {
+    int distance;
+    char next_hop;
+    struct sockaddr_in destaddr;
+    char nickname;
+    time_t last_updated;
+} node__t;
+
+typedef struct {
+    uint8_t command;
+    uint8_t version;
+    uint16_t blank;
+    uint8_t entries;
+} packet__t;
+
+typedef struct {
+    char node;
+    uint32_t distance;
+} entry__t;
+
+node__t **topo = NULL;
+node__t **neighbors = NULL;
+int num_neighbors = 0;
+node__t *this = NULL;
+int local_port = 0;
+
+void parse_node_config(char *nodefp);
+void parse_neighbor_config(char *neighborfp);
+void add_neighbor(node__t *node);
+int is_this(node__t *node);
+int is_neighbor(node__t *node);
+node__t *get_node(char nick);
+void print_node(node__t *node);
+void print_topo();
+void print_neighbors();
+
+int main(int argc, char **argv)
+{
+    if (argc != 4) {
+        printf("Usage: %s <node.config> <neightbor.config> <local_port>\n\n", argv[0]);
+        exit(1);
+    }
+    
+    local_port = strtoul(argv[3], NULL, 10);
+    parse_node_config(argv[1]);
+    parse_neighbor_config(argv[2]);
+    
+    print_topo();
+    print_neighbors();
+    
+    
+    
+}
+
+void parse_node_config(char *nodefp)
+{
+    int num_alloced = 4;
+    FILE *fp = fopen(nodefp, "r");
+    
+    if (!fp) {
+        printf("  parse_node_config(): fopen(%s) ERROR.\n\n", nodefp);
+        exit(2);
+    }
+    
+    if ((topo = calloc(num_alloced + 1, sizeof(node__t*))) == NULL) {
+        err_sys("  parse_node_config(): ERROR allocating memory!\n\n");
+    } 
+    
+    int i;
+    for (i = 0; 1; i++) {
+        char buffer[100],
+             ipaddr[20];
+        int port;
+        
+        if (i >= num_alloced) {//We need more space!
+            num_alloced *= 2;
+            //Get us more space
+            if ((topo = realloc(topo, (sizeof(node__t*) * (num_alloced + 1)))) == NULL) {
+                err_sys("parse_node_config(): ERROR allocating memory!\n\n");
+            }
+            
+            //Why isn't there a Recalloc?
+            int j;
+            for (j = num_alloced/2; j < num_alloced + 1; j++) {
+                topo[j] = NULL;
+            }
+        }
+        
+        //Initialize space for next node
+        if ((topo[i] = calloc(1, sizeof(node__t))) == NULL) {
+            err_sys("  parse_node_config(): ERROR allocating memory!\n\n");
+        }
+        topo[i]->distance = MAX_DISTANCE;
+        topo[i]->last_updated = time(NULL);
+        bzero(&(topo[i]->destaddr), sizeof(topo[i]->destaddr));
+        topo[i]->destaddr.sin_family = AF_INET;
+        
+        //Get next line in file
+        if ((fgets(buffer, 100, fp)) == NULL) {
+            //if it's an empty string, we're at EOF
+            free(topo[i]);
+            topo[i] = NULL;
+            break;
+        }
+        
+        if (sscanf(buffer, "%c %s %d", &(topo[i]->nickname), ipaddr, &port) != 3) {
+            printf("  sscanf() failed\n");
+            free(topo[i]);
+            topo[i] = NULL;
+            break;
+        }
+        
+        //printf("local_port=%d, port=%d\n", local_port, port);
+        if (port == local_port) {
+            this = topo[i];
+            this->distance = 0;
+        }
+        
+        topo[i]->destaddr.sin_port = htons(port);
+        if (inet_pton(AF_INET, ipaddr, &(topo[i]->destaddr.sin_addr)) <= 0)
+        {
+            printf("parse_node_config():  inet_pton(%s) ERROR\n\n", ipaddr);
+            free(topo[i]);
+            topo[i] = NULL;
+            break;
+        }
+        
+    }
+    fclose(fp);
+    //print_topo();
+}
+
+void parse_neighbor_config(char *neighborfp)
+{
+    char from, to, buffer[100];
+    int dist;
+    FILE *fp = fopen(neighborfp, "r");
+    
+    if (!fp) {
+        printf("  parse_neighbor_config(): fopen(%s) ERROR.\n\n", neighborfp);
+        exit(3);
+    }
+    
+    while ((fgets(buffer, 100, fp)) != NULL) {
+        printf("parse_neighbor_config(): got %s", buffer);
+        if (sscanf(buffer, "%c %c %d", &from, &to, &dist) != 3) {
+            printf("  parse_neighbor_config(): sscanf(%s) ERROR.\n\n", buffer);
+        }
+        
+        if (from == this->nickname) {
+            get_node(to)->distance = dist;
+            get_node(to)->next_hop = to;
+            add_neighbor(get_node(to));
+        } else if (to == this->nickname) {
+            get_node(from)->distance = dist;
+            get_node(from)->next_hop = from;
+            add_neighbor(get_node(from));
+        }
+    }
+    fclose(fp);
+    //print_neighbors();
+}
+
+void add_neighbor(node__t *node)
+{
+    if (!node) return;
+    if (is_neighbor(node)) return;
+    
+    //printf("add_neighbor(): adding \"");
+    //print_node(node);
+    //printf("\"\ncurrent: %p, %d\n", neighbors, num_neighbors);
+    
+    num_neighbors++;
+    if ((neighbors = realloc(neighbors, num_neighbors * sizeof(node__t*))) == NULL) {
+        err_sys("  add_neighbor(): ERROR allocating memory!\n\n");
+    }
+    //printf("new: %p, %d.  Adding node at [%d]\n", neighbors, num_neighbors, num_neighbors - 1);
+    
+    neighbors[num_neighbors - 1] = node;
+    
+    //print_neighbors();
+}
+
+int is_this(node__t *node)
+{
+    return (node == this);
+}
+
+int is_neighbor(node__t *node)
+{
+    //printf("is_neighbor(): checking \"");
+    //print_node(node);
+    //printf("\"\n");
+    int i;
+    for (i = 0; i < num_neighbors; i++) {
+        if (neighbors[i] == node) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+node__t *get_node(char nick)
+{
+    int i = 0;
+    while (topo[i]) {
+        if (topo[i]->nickname == nick) {
+            return topo[i];
+        }
+        i++;
+    }
+    return NULL;
+}
+
+void print_node(node__t *node)
+{
+    if (!node) return;
+    
+    printf("%p  %c%c | %*d@%c    %d     %s:%u",
+        node,
+        node->nickname,
+        ((is_this(node))?
+           ('*')
+           :((is_neighbor(node))?
+              ('-')
+              :(' ')
+            )
+        ),
+        (int)floor(log10(abs((float)MAX_DISTANCE))) + 1, //from https://stackoverflow.com/a/1068870
+        node->distance,
+        (node->next_hop == 0)?('?'):(node->next_hop),
+        (time(NULL) - node->last_updated),
+        inet_ntoa(node->destaddr.sin_addr),
+        node->destaddr.sin_port
+    );
+}
+
+void print_topo()
+{
+    int i = 0;
+    
+    if (!topo) return;
+    
+    printf("----------------Topography-------------------\n");
+    printf("Node          | Dist     Time   IP\n");
+    printf("---------------------------------------------\n");
+    
+    while (topo[i] != NULL) {
+        print_node(topo[i]);
+        printf("\n");
+        i++;
+    }
+    printf("---------------------------------------------\n\n");
+}
+
+void print_neighbors()
+{
+    int i;
+    if (!neighbors) return;
+    
+    printf("---------------Neighbors (%d) ----------------\n", num_neighbors);
+    printf("Node           | Dist     Time   IP\n");
+    printf("---------------------------------------------\n");
+    
+    for (i = 0; i < num_neighbors; i++) {
+        print_node(neighbors[i]);
+        printf("\n");
+    }
+    printf("---------------------------------------------\n\n");
+}
+
+/*
 #define MAX_LISTEN_QUEUE 16
 #define MAX_URL_LENGTH 253
 #define MAX_HEADER_SIZE 32768
@@ -453,3 +729,7 @@ void write_log(char *request, struct sockaddr_in cliaddr, char *remoteaddr, char
     fclose(fp);
     pthread_mutex_unlock(&m);
 }
+
+
+*/
+

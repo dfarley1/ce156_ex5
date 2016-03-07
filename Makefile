@@ -27,8 +27,8 @@
 # Edit these variables for your project.
 # ======================================
 
-CLIENT_EXE = myproxy
-CLIENT_CFILES = myproxy.c
+CLIENT_EXE = myrip
+CLIENT_CFILES = myrip.c
 COMMON_CFILES = myunp.c
 
 
