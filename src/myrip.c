@@ -16,6 +16,7 @@ typedef struct {
     struct sockaddr_in destaddr;
     char nickname;
     time_t last_updated;
+    int neighbor;
 } node__t;
 
 typedef struct {
@@ -31,20 +32,15 @@ typedef struct {
 } entry__t;
 
 node__t **topo = NULL;
-node__t **neighbors = NULL;
-int num_neighbors = 0;
 node__t *this = NULL;
 int local_port = 0;
 
 void parse_node_config(char *nodefp);
 void parse_neighbor_config(char *neighborfp);
-void add_neighbor(node__t *node);
-int is_this(node__t *node);
-int is_neighbor(node__t *node);
 node__t *get_node(char nick);
 void print_node(node__t *node);
 void print_topo();
-void print_neighbors();
+void free_topo();
 
 int main(int argc, char **argv)
 {
@@ -58,10 +54,8 @@ int main(int argc, char **argv)
     parse_neighbor_config(argv[2]);
     
     print_topo();
-    print_neighbors();
     
-    
-    
+    free_topo();
 }
 
 void parse_node_config(char *nodefp)
@@ -78,10 +72,10 @@ void parse_node_config(char *nodefp)
         err_sys("  parse_node_config(): ERROR allocating memory!\n\n");
     } 
     
-    int i;
-    for (i = 0; 1; i++) {
+    for (int i = 0; 1; i++) {
         char buffer[100],
-             ipaddr[20];
+             ipaddr[20],
+             nick;
         int port;
         
         if (i >= num_alloced) {//We need more space!
@@ -115,12 +109,20 @@ void parse_node_config(char *nodefp)
             break;
         }
         
-        if (sscanf(buffer, "%c %s %d", &(topo[i]->nickname), ipaddr, &port) != 3) {
+        if (sscanf(buffer, "%c %s %d", &nick, ipaddr, &port) != 3) {
             printf("  sscanf() failed\n");
             free(topo[i]);
             topo[i] = NULL;
             break;
         }
+        
+        //Check for unique nicknames
+        if (get_node(nick) != NULL) {
+            err_sys("  parse_node_config(): Duplicate node nicknames!\n\n");
+        } else {
+            topo[i]->nickname = nick;
+        }
+        
         
         //printf("local_port=%d, port=%d\n", local_port, port);
         if (port == local_port) {
@@ -154,7 +156,7 @@ void parse_neighbor_config(char *neighborfp)
     }
     
     while ((fgets(buffer, 100, fp)) != NULL) {
-        printf("parse_neighbor_config(): got %s", buffer);
+        //printf("parse_neighbor_config(): got %s", buffer);
         if (sscanf(buffer, "%c %c %d", &from, &to, &dist) != 3) {
             printf("  parse_neighbor_config(): sscanf(%s) ERROR.\n\n", buffer);
         }
@@ -162,64 +164,23 @@ void parse_neighbor_config(char *neighborfp)
         if (from == this->nickname) {
             get_node(to)->distance = dist;
             get_node(to)->next_hop = to;
-            add_neighbor(get_node(to));
+            get_node(to)->neighbor = 1;
         } else if (to == this->nickname) {
             get_node(from)->distance = dist;
             get_node(from)->next_hop = from;
-            add_neighbor(get_node(from));
+            get_node(from)->neighbor = 1;
         }
     }
     fclose(fp);
     //print_neighbors();
 }
 
-void add_neighbor(node__t *node)
-{
-    if (!node) return;
-    if (is_neighbor(node)) return;
-    
-    //printf("add_neighbor(): adding \"");
-    //print_node(node);
-    //printf("\"\ncurrent: %p, %d\n", neighbors, num_neighbors);
-    
-    num_neighbors++;
-    if ((neighbors = realloc(neighbors, num_neighbors * sizeof(node__t*))) == NULL) {
-        err_sys("  add_neighbor(): ERROR allocating memory!\n\n");
-    }
-    //printf("new: %p, %d.  Adding node at [%d]\n", neighbors, num_neighbors, num_neighbors - 1);
-    
-    neighbors[num_neighbors - 1] = node;
-    
-    //print_neighbors();
-}
-
-int is_this(node__t *node)
-{
-    return (node == this);
-}
-
-int is_neighbor(node__t *node)
-{
-    //printf("is_neighbor(): checking \"");
-    //print_node(node);
-    //printf("\"\n");
-    int i;
-    for (i = 0; i < num_neighbors; i++) {
-        if (neighbors[i] == node) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
 node__t *get_node(char nick)
 {
-    int i = 0;
-    while (topo[i]) {
+    for (int i = 0; topo[i]; i++) {
         if (topo[i]->nickname == nick) {
             return topo[i];
         }
-        i++;
     }
     return NULL;
 }
@@ -231,9 +192,9 @@ void print_node(node__t *node)
     printf("%p  %c%c | %*d@%c    %d     %s:%u",
         node,
         node->nickname,
-        ((is_this(node))?
+        ((node == this)?
            ('*')
-           :((is_neighbor(node))?
+           :((node->neighbor == 1)?
               ('-')
               :(' ')
             )
@@ -249,36 +210,25 @@ void print_node(node__t *node)
 
 void print_topo()
 {
-    int i = 0;
-    
     if (!topo) return;
     
     printf("----------------Topography-------------------\n");
     printf("Node          | Dist     Time   IP\n");
     printf("---------------------------------------------\n");
     
-    while (topo[i] != NULL) {
+    for (int i = 0; topo[i]; i++) {
         print_node(topo[i]);
         printf("\n");
-        i++;
     }
     printf("---------------------------------------------\n\n");
 }
 
-void print_neighbors()
+void free_topo()
 {
-    int i;
-    if (!neighbors) return;
-    
-    printf("---------------Neighbors (%d) ----------------\n", num_neighbors);
-    printf("Node           | Dist     Time   IP\n");
-    printf("---------------------------------------------\n");
-    
-    for (i = 0; i < num_neighbors; i++) {
-        print_node(neighbors[i]);
-        printf("\n");
+    for (int i = 0; topo[i]; i++) {
+        free(topo[i]);
     }
-    printf("---------------------------------------------\n\n");
+    free(topo);
 }
 
 /*

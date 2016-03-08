@@ -37,4 +37,8 @@ myunp.o: ../src/myunp.c /usr/include/stdc-predef.h ../src/myunp.h \
  /usr/include/bits/sigaction.h /usr/include/bits/sigcontext.h \
  /usr/include/bits/sigstack.h /usr/include/sys/ucontext.h \
  /usr/include/bits/sigthread.h /usr/include/netdb.h \
- /usr/include/rpc/netdb.h /usr/include/bits/netdb.h
+ /usr/include/rpc/netdb.h /usr/include/bits/netdb.h /usr/include/math.h \
+ /usr/include/bits/huge_val.h /usr/include/bits/huge_valf.h \
+ /usr/include/bits/huge_vall.h /usr/include/bits/inf.h \
+ /usr/include/bits/nan.h /usr/include/bits/mathdef.h \
+ /usr/include/bits/mathcalls.h

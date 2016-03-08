@@ -20,7 +20,7 @@ vpath %.o ../obj
 all : $(CLIENT_EXE) $(SERVER_EXE)
 
 $(CLIENT_EXE) : $(CLIENT_OBJS) $(COMMON_OBJS)
-	$(CC) -pthread $^ -o $@
+	$(CC) $^ -o $@
 
 $(SERVER_EXE) : $(SERVER_OBJS) $(COMMON_OBJS)
 	$(CC) $^ -o $@
