@@ -15,7 +15,8 @@ myunp.o: ../src/myunp.c /usr/include/stdc-predef.h ../src/myunp.h \
  /usr/include/bits/socket.h /usr/include/bits/socket_type.h \
  /usr/include/bits/sockaddr.h /usr/include/asm/socket.h \
  /usr/include/asm-generic/socket.h /usr/include/asm/sockios.h \
- /usr/include/asm-generic/sockios.h /usr/include/netinet/in.h \
+ /usr/include/asm-generic/sockios.h /usr/include/sys/time.h \
+ /usr/include/netinet/in.h \
  /opt/rh/devtoolset-3/root/usr/lib/gcc/x86_64-redhat-linux/4.9.2/include/stdint.h \
  /usr/include/stdint.h /usr/include/bits/wchar.h /usr/include/bits/in.h \
  /usr/include/arpa/inet.h /usr/include/stdio.h /usr/include/libio.h \
@@ -41,4 +42,9 @@ myunp.o: ../src/myunp.c /usr/include/stdc-predef.h ../src/myunp.h \
  /usr/include/bits/huge_val.h /usr/include/bits/huge_valf.h \
  /usr/include/bits/huge_vall.h /usr/include/bits/inf.h \
  /usr/include/bits/nan.h /usr/include/bits/mathdef.h \
- /usr/include/bits/mathcalls.h
+ /usr/include/bits/mathcalls.h \
+ /opt/rh/devtoolset-3/root/usr/lib/gcc/x86_64-redhat-linux/4.9.2/include/limits.h \
+ /opt/rh/devtoolset-3/root/usr/lib/gcc/x86_64-redhat-linux/4.9.2/include/syslimits.h \
+ /usr/include/limits.h /usr/include/bits/posix1_lim.h \
+ /usr/include/bits/local_lim.h /usr/include/linux/limits.h \
+ /usr/include/bits/posix2_lim.h

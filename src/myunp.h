@@ -7,6 +7,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/select.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <stdio.h>
@@ -20,6 +22,7 @@
 #include <netdb.h>
 #include <time.h>
 #include <math.h>
+#include <limits.h>
 
 #define LISTENQ 1024
 #define MAXLINE 4096

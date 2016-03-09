@@ -4,46 +4,62 @@
  * Usage: ./myrip <node.config> <neightbor.config> <local_port>
  */
 
-#include "myunp.h"
+#include "mytimer.h"
 
-#define UPDATE_INTERVAL 10
+#define UPDATE_INTERVAL 10+(rand()%5)
 #define DEAD_ROUTE 40
-#define MAX_DISTANCE 100
+#define MAX_DISTANCE 16
 
 typedef struct {
-    int distance;
+    uint32_t distance;
     char next_hop;
     struct sockaddr_in destaddr;
     char nickname;
     time_t last_updated;
-    int neighbor;
+    int fd_neighbor;
 } node__t;
 
 typedef struct {
-    uint8_t command;
-    uint8_t version;
-    uint16_t blank;
-    uint8_t entries;
+    uint8_t command;      //2 = response
+    uint8_t version;      //1 = RIP v1
+    uint16_t num_entries; 
+    uint8_t entries;      
 } packet__t;
 
 typedef struct {
-    char node;
-    uint32_t distance;
+    uint8_t family;    //2 = IP
+    uint16_t blank1;   //00
+    uint32_t addr;     
+    uint32_t blank2;   //0000
+    uint32_t blank3;   //0000
+    uint32_t distance; 
 } entry__t;
 
 node__t **topo = NULL;
 node__t *this = NULL;
 int local_port = 0;
+int incfd = 0;
+mytimer_t timer_30s = TIMER_INIT;
 
 void parse_node_config(char *nodefp);
 void parse_neighbor_config(char *neighborfp);
 node__t *get_node(char nick);
+int is_neighbor(struct sockaddr_in *addr);
+int sizeof_topo();
 void print_node(node__t *node);
 void print_topo();
 void free_topo();
 
+packet__t *new_blank_packet();
+
 int main(int argc, char **argv)
 {
+    int n, len;
+    struct sockaddr_in incaddr;
+    packet__t *p_recv = new_blank_packet();
+    
+    srand(time(NULL));
+    
     if (argc != 4) {
         printf("Usage: %s <node.config> <neightbor.config> <local_port>\n\n", argv[0]);
         exit(1);
@@ -54,6 +70,38 @@ int main(int argc, char **argv)
     parse_neighbor_config(argv[2]);
     
     print_topo();
+    
+    incfd = Socket(AF_INET, SOCK_DGRAM, 0);
+    Bind(incfd, (SA *) &(this->destaddr), sizeof(this->destaddr));
+    
+    for (;;) {
+        len = sizeof(incaddr);
+        n = recvfrom(incfd,
+                     p_recv,  //header -  pkt->entries   +        N       *     entries
+                     sizeof(packet__t) - sizeof(uint8_t) + (sizeof_topo() * sizeof(entry__t)),
+                     0,
+                     (SA *) &incaddr,
+                     &len);
+        if (n < 0) {
+            printf("recvfrom() error: %s\n", strerror(errno));
+            //error, ignore it?
+        } else if (n == 0) {
+            printf("recvfrom() error: n == 0\n");
+            //"peer has performed an orderly shutdown"
+            //What do?
+        } else {
+            //If the packet isn't from a neighbor then we don't care
+            
+            printf("got packet with %d entries from %s:%u\n", 
+                    p_recv->num_entries, 
+                    inet_ntoa(incaddr.sin_addr),
+                    incaddr.sin_port);
+            
+            
+        }
+        free(p_recv);
+        p_recv = new_blank_packet();
+    }
     
     free_topo();
 }
@@ -128,6 +176,7 @@ void parse_node_config(char *nodefp)
         if (port == local_port) {
             this = topo[i];
             this->distance = 0;
+            this->next_hop = nick;
         }
         
         topo[i]->destaddr.sin_port = htons(port);
@@ -161,14 +210,20 @@ void parse_neighbor_config(char *neighborfp)
             printf("  parse_neighbor_config(): sscanf(%s) ERROR.\n\n", buffer);
         }
         
+        //Is it better to quit or invalidate the line?
+        if (dist >= MAX_DISTANCE) {
+            printf("  parse_neighbor_config(): dist=%d >= MAX=%d.  Skipping connection.\n\n", dist, MAX_DISTANCE);
+            continue;
+        }
+        
         if (from == this->nickname) {
             get_node(to)->distance = dist;
             get_node(to)->next_hop = to;
-            get_node(to)->neighbor = 1;
+            get_node(to)->fd_neighbor = Socket(AF_INET, SOCK_DGRAM, 0);
         } else if (to == this->nickname) {
             get_node(from)->distance = dist;
             get_node(from)->next_hop = from;
-            get_node(from)->neighbor = 1;
+            get_node(from)->fd_neighbor = Socket(AF_INET, SOCK_DGRAM, 0);
         }
     }
     fclose(fp);
@@ -185,6 +240,25 @@ node__t *get_node(char nick)
     return NULL;
 }
 
+int is_neighbor(struct sockaddr_in *addr)
+{
+    for (int i = 0; topo[i]; i++) {
+        
+    }
+    return 0;
+}
+
+int sizeof_topo()
+{
+    if (!topo) return 0;
+    for (int i = 0; topo[i]; i++) {
+		if (!topo[i+1]) {
+			return i+1;
+		}
+	}
+    return 0;
+}
+
 void print_node(node__t *node)
 {
     if (!node) return;
@@ -194,9 +268,9 @@ void print_node(node__t *node)
         node->nickname,
         ((node == this)?
            ('*')
-           :((node->neighbor == 1)?
-              ('-')
-              :(' ')
+           :((node->fd_neighbor == 0)?
+              (' ')
+              :('-')
             )
         ),
         (int)floor(log10(abs((float)MAX_DISTANCE))) + 1, //from https://stackoverflow.com/a/1068870
@@ -229,6 +303,23 @@ void free_topo()
         free(topo[i]);
     }
     free(topo);
+}
+
+packet__t *new_blank_packet()
+{
+    packet__t *p_new = calloc(1, sizeof(packet__t) 
+                                      - sizeof(uint8_t) 
+                                      + (sizeof_topo() * sizeof(entry__t)));
+    p_new->command = 2;
+    p_new->version = 1;
+    p_new->num_entries = sizeof_topo();
+    
+    entry__t *entries = &(p_new->entries);
+    for (int i = 0; i < sizeof_topo(); i++) {
+        entries[i].family = 2;
+    }
+    
+    return p_new;
 }
 
 /*
