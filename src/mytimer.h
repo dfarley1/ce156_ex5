@@ -6,6 +6,8 @@
  * See timertest.c for an example of its use.
  */
 
+#include <time.h>
+#include <limits.h>
 #include "myunp.h"
 
 #define TIME_T_MAX (sizeof(time_t) == 4 ? 0x7fffffff : 0x7fffffffffffffffL)

@@ -6,7 +6,7 @@
 
 #include "mytimer.h"
 
-#define UPDATE_INTERVAL 10+(rand()%5)
+#define UPDATE_INTERVAL 10  //also includes 0-4 seconds of randomness
 #define DEAD_ROUTE 40
 #define MAX_DISTANCE 16
 
@@ -38,7 +38,9 @@ typedef struct {
 node__t **topo = NULL;
 node__t *this = NULL;
 int local_port = 0;
-int incfd = 0;
+int sockfd = 0;
+mytimer_t tmr_send_routes = TIMER_INIT;
+mytimer_t tmr_check_dead_routes = TIMER_INIT;
 
 void parse_node_config(char *nodefp);
 void parse_neighbor_config(char *neighborfp);
@@ -50,14 +52,17 @@ void free_topo();
 packet__t *new_packet(int num_entries);
 int sizeof_packet(packet__t *pkt);
 int is_valid_route(node__t *node);
-void create_route_packet(int signo);
+void create_route_packet(time_t now);
 void send_routes(packet__t *p_routes);
+void check_route_validity(time_t now);
 
 int main(int argc, char **argv)
 {
     int n, len;
     struct sockaddr_in incaddr;
     packet__t *p_recv = new_packet(sizeof_topo());
+    struct timeval tv;
+    fd_set rset;
     
     srand(time(NULL));
     
@@ -72,10 +77,10 @@ int main(int argc, char **argv)
     
     print_topo();
     
-    incfd = Socket(AF_INET, SOCK_DGRAM, 0);
-    Bind(incfd, (SA *) &(this->destaddr), sizeof(this->destaddr));
+    sockfd = Socket(AF_INET, SOCK_DGRAM, 0);
+    Bind(sockfd, (SA *) &(this->destaddr), sizeof(this->destaddr));
     
-    
+    /*
     //Set sigalarm action
     struct sigaction sact = {
         .sa_handler = create_route_packet,
@@ -84,34 +89,57 @@ int main(int argc, char **argv)
     if (sigaction(SIGALRM, &sact, NULL) == -1) {
         err_sys("sigaction error: %s", strerror(errno));
     }
+    */
+    timer_start_periodic(&tmr_send_routes, UPDATE_INTERVAL+(rand()%5), create_route_packet);
+    timer_start_periodic(&tmr_check_dead_routes, DEAD_ROUTE, check_route_validity);
     
     for (;;) {
         len = sizeof(incaddr);
-        alarm(UPDATE_INTERVAL);
-        n = recvfrom(incfd,
-                     p_recv,  //header -  pkt->entries   +        N       *     entries
-                     sizeof(packet__t) - sizeof(uint8_t) + (sizeof_topo() * sizeof(entry__t)),
-                     0,
-                     (SA *) &incaddr,
-                     &len);
-        if (n < 0) {
-            printf("recvfrom() error: %s\n", strerror(errno));
-            //error, ignore it?
-        } else if (n == 0) {
-            printf("recvfrom() error: n == 0\n");
-            //"peer has performed an orderly shutdown"
-            //What do?
-        } else {
-            //If the packet isn't from a neighbor then we don't care
-            
-            printf("got packet with %d entries from %s:%u\n", 
-                    p_recv->num_entries, 
-                    inet_ntoa(incaddr.sin_addr),
-                    ntohs(incaddr.sin_port)
-                   );
-            
-            
+        //alarm(UPDATE_INTERVAL);
+        
+        tv_init(&tv);
+        tv_timer(&tv, &tmr_send_routes);
+        tv_timer(&tv, &tmr_check_dead_routes);
+        
+        FD_ZERO(&rset);
+        FD_SET(sockfd, &rset);
+        
+        if (select(1, &rset, NULL, NULL, &tv) < 0) {
+            err_quit("select() < 0, strerror(errno) = %s\n", strerror(errno));
+        } 
+        
+        //TODO: check for packet arrival?
+        if (FD_ISSET(sockfd, &rset)) {
+            n = recvfrom(sockfd,
+                         p_recv,  //header -  pkt->entries   +        N       *     entries
+                         sizeof(packet__t) - sizeof(uint8_t) + (sizeof_topo() * sizeof(entry__t)),
+                         0,
+                         (SA *) &incaddr,
+                         &len);
+            if (n < 0) {
+                printf("recvfrom() error: %s\n", strerror(errno));
+                //error, ignore it?
+            } else if (n == 0) {
+                printf("recvfrom() error: n == 0\n");
+                //"peer has performed an orderly shutdown"
+                //What do?
+            } else {
+                //If the packet isn't from a neighbor then we don't care
+                
+                //TODO: do things with the packet
+                printf("got packet with %d entries from %s:%u\n", 
+                        p_recv->num_entries, 
+                        inet_ntoa(incaddr.sin_addr),
+                        ntohs(incaddr.sin_port)
+                       );
+                
+                
+            }
         }
+        
+        timer_check(&tmr_send_routes);
+        timer_check(&tmr_check_dead_routes);
+        
         free(p_recv);
         p_recv = new_packet(sizeof_topo());
     }
@@ -272,7 +300,7 @@ void print_node(node__t *node)
     
     int max_distance_width = (int)floor(log10((double)abs(MAX_DISTANCE))) + 1; //from https://stackoverflow.com/a/1068870
     
-    //FIXME: "undefined reference to log10 and floor" Why doesn't this work...?  
+    //TODO: "undefined reference to log10 and floor" Why doesn't this work...?  
     //int label_width = (int)floor(log10((double)abs(sizeof_topo()))) + 1;
     int label_width = 1;
     
@@ -354,11 +382,11 @@ int is_valid_route(node__t *node)
     return (
             (node->next_hop != 0) 
             && (time(NULL) - node->last_updated <= DEAD_ROUTE)
-            && (node != this)
+            //&& (node != this)  //TODO: No need for a special case when parsing routes?
            );
 }
 
-void create_route_packet(int signo)
+void create_route_packet(time_t now)
 {
     printf("create_route_packet() started!\n");
     
@@ -411,7 +439,7 @@ void send_routes(packet__t *p_routes)
                     ntohs(topo[i]->destaddr.sin_port)
                    );
             
-            Sendto(incfd,
+            Sendto(sockfd,
                    p_routes,
                    sizeof_packet(p_routes),
                    0,
@@ -420,4 +448,11 @@ void send_routes(packet__t *p_routes)
                   );
         }
     }
+}
+
+void check_route_validity(time_t now)
+{
+    printf("check_route_validity() started!\n");
+    
+    //TODO
 }
