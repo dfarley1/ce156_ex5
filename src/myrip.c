@@ -108,7 +108,8 @@ int main(int argc, char **argv)
             printf("got packet with %d entries from %s:%u\n", 
                     p_recv->num_entries, 
                     inet_ntoa(incaddr.sin_addr),
-                    incaddr.sin_port);
+                    ntohs(incaddr.sin_port)
+                   );
             
             
         }
@@ -283,7 +284,7 @@ void print_node(node__t *node)
         (node->next_hop == 0)?('?'):(node->next_hop),
         (time(NULL) - node->last_updated),
         inet_ntoa(node->destaddr.sin_addr),
-        node->destaddr.sin_port
+        ntohs(node->destaddr.sin_port)
     );
 }
 
@@ -383,6 +384,7 @@ void create_route_packet(int signo)
     
     //send packet to neighbors
     send_routes(p_routes);
+    free(p_routes);
     
     //reset alarm
     alarm(0);
@@ -395,7 +397,7 @@ void send_routes(packet__t *p_routes)
         if (topo[i]->fd_neighbor) {
             printf("  send_routes(): sending to %s:%u\n", 
                     inet_ntoa(topo[i]->destaddr.sin_addr),
-                    topo[i]->destaddr.sin_port
+                    ntohs(topo[i]->destaddr.sin_port)
                    );
             
             Sendto(topo[i]->fd_neighbor, 
