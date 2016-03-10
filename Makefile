@@ -29,7 +29,7 @@
 
 CLIENT_EXE = myrip
 CLIENT_CFILES = myrip.c
-COMMON_CFILES = myunp.c
+COMMON_CFILES = myunp.c mytimer.c
 
 
 # ================================================================

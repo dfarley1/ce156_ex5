@@ -22,7 +22,7 @@ vpath %.h ../src
 .PHONY: all
 all : $(OBJS)
 
-CFLAGS += -ggdb -std=gnu99 -pthread
+CFLAGS += -ggdb -std=gnu99 -pthread -lm
 
 
 # Remember to do a "make clean" after editing the Makefile.

@@ -17,9 +17,13 @@ void timer_start(mytimer_t *timer,
                  int delay_in_seconds,
                  void (*callback)(time_t))
 {
+    //printf("timer_start(): %d\n", delay_in_seconds);
+    
     timer->alarm_time   = time(NULL) + delay_in_seconds;
     timer->period       = 0;    // special value means non-periodic timer
     timer->callback     = callback;
+    
+    //printf("  alarm=%ld, per=%d, call=%p\n", (long)timer->alarm_time, timer->period, timer->callback);
 }
 
 // Call this function to start a periodic timer.
@@ -47,11 +51,8 @@ void timer_check(mytimer_t *timer)
 {
     time_t now = time(NULL);
 
-    if (now > timer->alarm_time)
+    if (now >= timer->alarm_time)
     {
-        // Call the callback function.
-        if (timer->callback != NULL) timer->callback(now);
-
         // Clear or restart the timer.
         if (timer->period == 0)
         {
@@ -63,14 +64,21 @@ void timer_check(mytimer_t *timer)
             // restart the periodic timer
             timer->alarm_time += timer->period;
         }
+        
+        // Call the callback function.
+        if (timer->callback != NULL) timer->callback(now);
     }
 }
 
 // Call this function before calling tv_timer().
 void tv_init(struct timeval *tv)
 {
+    //printf("\ntv_init: before: sec=%ld\n", tv->tv_sec);
+    
     tv->tv_usec = 0;
     tv->tv_sec  = LONG_MAX;
+    
+    //printf("\ntv_init: after: sec=%ld\n", tv->tv_sec);
 }
 
 // Call this function for each timer before calling select().
@@ -78,11 +86,18 @@ void tv_init(struct timeval *tv)
 // for the earliest timer. Then you can pass &tv to select().
 void tv_timer(struct timeval *tv, mytimer_t *timer)
 {
+    
+    //printf("\ntv_timer: before:\n  tv->sec=%ld\n  tv->usec=%d\n  timer->alarm_time=%ld\n", 
+    //        tv->tv_sec, tv->tv_usec, (long)timer->alarm_time);
+    
     // How many seconds until the timer's alarm goes off?
     time_t num_seconds = timer->alarm_time - time(NULL);
 
     // trigger past timer immediately
     if (num_seconds < 0) num_seconds = 0;
+    
+    //printf("  num_seconds=%ld\n", (long)num_seconds);
+    
     
     // select() has an undocumented maximum allowed value for tv_sec.
     if (num_seconds > 100000000) num_seconds = 100000000;
@@ -92,4 +107,7 @@ void tv_timer(struct timeval *tv, mytimer_t *timer)
     {
         tv->tv_sec = (long) num_seconds;
     }
+    
+    //printf("\ntv_timer: after:\n  tv->sec=%ld\n  tv->usec=%d\n  timer->alarm_time=%ld\n", 
+    //        tv->tv_sec, tv->tv_usec, (long)timer->alarm_time);
 }

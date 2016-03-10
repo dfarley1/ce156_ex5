@@ -6,8 +6,8 @@
 
 #include "mytimer.h"
 
-#define UPDATE_INTERVAL 10  //also includes 0-4 seconds of randomness
-#define DEAD_ROUTE 40
+#define UPDATE_INTERVAL 3  //also includes 0-4 seconds of randomness
+#define DEAD_ROUTE 15
 #define MAX_DISTANCE 16
 
 typedef struct {
@@ -61,8 +61,8 @@ int main(int argc, char **argv)
     int n, len;
     struct sockaddr_in incaddr;
     packet__t *p_recv = new_packet(sizeof_topo());
-    struct timeval tv;
     fd_set rset;
+    struct timeval tv;
     
     srand(time(NULL));
     
@@ -90,8 +90,9 @@ int main(int argc, char **argv)
         err_sys("sigaction error: %s", strerror(errno));
     }
     */
-    timer_start_periodic(&tmr_send_routes, UPDATE_INTERVAL+(rand()%5), create_route_packet);
-    timer_start_periodic(&tmr_check_dead_routes, DEAD_ROUTE, check_route_validity);
+    printf("starting timers: %u\n", time(NULL));
+    timer_start(&tmr_send_routes, UPDATE_INTERVAL+(rand()%5), create_route_packet);
+    timer_start(&tmr_check_dead_routes, DEAD_ROUTE, check_route_validity);
     
     for (;;) {
         len = sizeof(incaddr);
@@ -104,6 +105,7 @@ int main(int argc, char **argv)
         FD_ZERO(&rset);
         FD_SET(sockfd, &rset);
         
+        printf("entering select: sec=%ld, usec=%ld\n", (long)tv.tv_sec, (long)tv.tv_usec);
         if (select(1, &rset, NULL, NULL, &tv) < 0) {
             err_quit("select() < 0, strerror(errno) = %s\n", strerror(errno));
         } 
@@ -135,13 +137,13 @@ int main(int argc, char **argv)
                 
                 
             }
+            free(p_recv);
+            p_recv = new_packet(sizeof_topo());
         }
         
+        printf("  ...checking timers\n");
         timer_check(&tmr_send_routes);
         timer_check(&tmr_check_dead_routes);
-        
-        free(p_recv);
-        p_recv = new_packet(sizeof_topo());
     }
     
     free_topo();
@@ -299,10 +301,9 @@ void print_node(node__t *node)
     
     
     int max_distance_width = (int)floor(log10((double)abs(MAX_DISTANCE))) + 1; //from https://stackoverflow.com/a/1068870
-    
-    //TODO: "undefined reference to log10 and floor" Why doesn't this work...?  
-    //int label_width = (int)floor(log10((double)abs(sizeof_topo()))) + 1;
-    int label_width = 1;
+     
+    int label_width = (int)floor(log10((double)abs(sizeof_topo()))) + 1;
+    //int label_width = 1;
     
     printf("%p  %*u%c | %*d@%*u    %d     %s:%u",
         node,  //%p
@@ -388,7 +389,7 @@ int is_valid_route(node__t *node)
 
 void create_route_packet(time_t now)
 {
-    printf("create_route_packet() started!\n");
+    printf("create_route_packet() started: %u\n", time(NULL));
     
     int num_routes = 0;
     packet__t *p_routes;
@@ -418,16 +419,16 @@ void create_route_packet(time_t now)
     entry__t *tmp = (entry__t*) &(p_routes->entries);
     
     for (int i = 0; i < p_routes->num_entries; i++) {
-        printf("  create_route_packet(): entry %d - %d@%c\n", i, tmp[i].distance, (char) tmp[i].addr);
+        printf("  create_route_packet(): entry %d - %d@%u\n", i, tmp[i].distance, (char) tmp[i].addr);
     }
     
     //send packet to neighbors
     send_routes(p_routes);
     free(p_routes);
     
-    //reset alarm
-    alarm(0);
-    alarm(UPDATE_INTERVAL);
+    //reset timer
+    timer_start(&tmr_send_routes, UPDATE_INTERVAL+(rand()%5), create_route_packet);
+    //tv_timer(&tv, &tmr_send_routes);
 }
 
 void send_routes(packet__t *p_routes)
@@ -452,7 +453,11 @@ void send_routes(packet__t *p_routes)
 
 void check_route_validity(time_t now)
 {
-    printf("check_route_validity() started!\n");
+    printf("\n\n\n\ncheck_route_validity() started: %u\n\n\n\n", time(NULL));
     
-    //TODO
+    //TODO:timer for each 
+    
+    //TODO: check_dead_routes should figure out when the next one will be invalid, not a const
+    timer_start(&tmr_check_dead_routes, DEAD_ROUTE, check_route_validity);
+    //tv_timer(&tv, &tmr_check_dead_routes);
 }
