@@ -6,8 +6,8 @@
 
 #include "mytimer.h"
 
-#define UPDATE_INTERVAL 3  //also includes 0-4 seconds of randomness
-#define DEAD_ROUTE 15
+#define UPDATE_INTERVAL 10  //also includes 0-4 seconds of randomness
+#define DEAD_ROUTE 40
 #define MAX_DISTANCE 16
 
 typedef struct {
@@ -78,25 +78,15 @@ int main(int argc, char **argv)
     print_topo();
     
     sockfd = Socket(AF_INET, SOCK_DGRAM, 0);
+    this->destaddr.sin_addr.s_addr = htonl(INADDR_ANY);
     Bind(sockfd, (SA *) &(this->destaddr), sizeof(this->destaddr));
     
-    /*
-    //Set sigalarm action
-    struct sigaction sact = {
-        .sa_handler = create_route_packet,
-        .sa_flags = SA_RESTART,
-    };
-    if (sigaction(SIGALRM, &sact, NULL) == -1) {
-        err_sys("sigaction error: %s", strerror(errno));
-    }
-    */
-    printf("starting timers: %u\n", time(NULL));
+    //printf("starting timers: %u\n", time(NULL));
     timer_start(&tmr_send_routes, UPDATE_INTERVAL+(rand()%5), create_route_packet);
     timer_start(&tmr_check_dead_routes, DEAD_ROUTE, check_route_validity);
     
     for (;;) {
         len = sizeof(incaddr);
-        //alarm(UPDATE_INTERVAL);
         
         tv_init(&tv);
         tv_timer(&tv, &tmr_send_routes);
@@ -105,13 +95,15 @@ int main(int argc, char **argv)
         FD_ZERO(&rset);
         FD_SET(sockfd, &rset);
         
-        printf("entering select: sec=%ld, usec=%ld\n", (long)tv.tv_sec, (long)tv.tv_usec);
-        if (select(1, &rset, NULL, NULL, &tv) < 0) {
+        //printf("entering select: sec=%ld, usec=%ld\n", (long)tv.tv_sec, (long)tv.tv_usec);
+        int n;
+        if ((n = select(sockfd+1, &rset, NULL, NULL, &tv)) < 0) {
             err_quit("select() < 0, strerror(errno) = %s\n", strerror(errno));
-        } 
+        }
         
         //TODO: check for packet arrival?
         if (FD_ISSET(sockfd, &rset)) {
+            printf("sockfd set\n");
             n = recvfrom(sockfd,
                          p_recv,  //header -  pkt->entries   +        N       *     entries
                          sizeof(packet__t) - sizeof(uint8_t) + (sizeof_topo() * sizeof(entry__t)),
@@ -141,7 +133,7 @@ int main(int argc, char **argv)
             p_recv = new_packet(sizeof_topo());
         }
         
-        printf("  ...checking timers\n");
+        //printf("  ...checking timers\n");
         timer_check(&tmr_send_routes);
         timer_check(&tmr_check_dead_routes);
     }
@@ -423,12 +415,13 @@ void create_route_packet(time_t now)
     }
     
     //send packet to neighbors
-    send_routes(p_routes);
+    //if (p_routes->num_entries > 0) { TODO
+        send_routes(p_routes);
+    //}
     free(p_routes);
     
     //reset timer
     timer_start(&tmr_send_routes, UPDATE_INTERVAL+(rand()%5), create_route_packet);
-    //tv_timer(&tv, &tmr_send_routes);
 }
 
 void send_routes(packet__t *p_routes)
@@ -459,5 +452,4 @@ void check_route_validity(time_t now)
     
     //TODO: check_dead_routes should figure out when the next one will be invalid, not a const
     timer_start(&tmr_check_dead_routes, DEAD_ROUTE, check_route_validity);
-    //tv_timer(&tv, &tmr_check_dead_routes);
 }
