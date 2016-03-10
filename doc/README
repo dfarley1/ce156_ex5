@@ -2,3 +2,10 @@ CMPE 156 ex5 - Routing Information Protocol implemtation
 Daniel Farley
 
 See doc/ex5_0.pdf for assignment requirements. 
+
+
+
+
+----------
+Notes:
+* Do not use 0 as a node identifier, it is reserved as "invalid/other".

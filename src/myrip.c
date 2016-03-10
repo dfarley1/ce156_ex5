@@ -12,11 +12,11 @@
 
 typedef struct {
     uint32_t distance;
-    char next_hop;
+    uint32_t next_hop;
     struct sockaddr_in destaddr;
-    char nickname;
+    uint32_t destination;
     time_t last_updated;
-    int fd_neighbor;
+    int neighbor;
 } node__t;
 
 typedef struct {
@@ -39,7 +39,6 @@ node__t **topo = NULL;
 node__t *this = NULL;
 int local_port = 0;
 int incfd = 0;
-mytimer_t timer_30s = TIMER_INIT;
 
 void parse_node_config(char *nodefp);
 void parse_neighbor_config(char *neighborfp);
@@ -136,8 +135,8 @@ void parse_node_config(char *nodefp)
     
     for (int i = 0; 1; i++) {
         char buffer[100],
-             ipaddr[20],
-             nick;
+             ipaddr[20];
+        uint32_t nick;
         int port;
         
         if (i >= num_alloced) {//We need more space!
@@ -171,18 +170,18 @@ void parse_node_config(char *nodefp)
             break;
         }
         
-        if (sscanf(buffer, "%c %s %d", &nick, ipaddr, &port) != 3) {
+        if (sscanf(buffer, "%u %s %d", &nick, ipaddr, &port) != 3) {
             printf("  sscanf() failed\n");
             free(topo[i]);
             topo[i] = NULL;
             break;
         }
         
-        //Check for unique nicknames
+        //Check for unique destinations
         if (get_node(nick) != NULL) {
-            err_sys("  parse_node_config(): Duplicate node nicknames!\n\n");
+            err_sys("  parse_node_config(): Duplicate node destinations!\n\n");
         } else {
-            topo[i]->nickname = nick;
+            topo[i]->destination = nick;
         }
         
         
@@ -209,7 +208,8 @@ void parse_node_config(char *nodefp)
 
 void parse_neighbor_config(char *neighborfp)
 {
-    char from, to, buffer[100];
+    char buffer[100];
+    uint32_t from, to;
     int dist;
     FILE *fp = fopen(neighborfp, "r");
     
@@ -220,7 +220,7 @@ void parse_neighbor_config(char *neighborfp)
     
     while ((fgets(buffer, 100, fp)) != NULL) {
         //printf("parse_neighbor_config(): got %s", buffer);
-        if (sscanf(buffer, "%c %c %d", &from, &to, &dist) != 3) {
+        if (sscanf(buffer, "%u %u %d", &from, &to, &dist) != 3) {
             printf("  parse_neighbor_config(): sscanf(%s) ERROR.\n\n", buffer);
         }
         
@@ -230,14 +230,14 @@ void parse_neighbor_config(char *neighborfp)
             continue;
         }
         
-        if (from == this->nickname) {
+        if (from == this->destination) {
             get_node(to)->distance = dist;
             get_node(to)->next_hop = to;
-            get_node(to)->fd_neighbor = Socket(AF_INET, SOCK_DGRAM, 0);
-        } else if (to == this->nickname) {
+            get_node(to)->neighbor = 1;
+        } else if (to == this->destination) {
             get_node(from)->distance = dist;
             get_node(from)->next_hop = from;
-            get_node(from)->fd_neighbor = Socket(AF_INET, SOCK_DGRAM, 0);
+            get_node(from)->neighbor = 1;
         }
     }
     fclose(fp);
@@ -247,7 +247,7 @@ void parse_neighbor_config(char *neighborfp)
 node__t *get_node(char nick)
 {
     for (int i = 0; topo[i]; i++) {
-        if (topo[i]->nickname == nick) {
+        if (topo[i]->destination == nick) {
             return topo[i];
         }
     }
@@ -269,22 +269,31 @@ void print_node(node__t *node)
 {
     if (!node) return;
     
-    printf("%p  %c%c | %*d@%c    %d     %s:%u",
-        node,
-        node->nickname,
-        ((node == this)?
+    
+    int max_distance_width = (int)floor(log10((double)abs(MAX_DISTANCE))) + 1; //from https://stackoverflow.com/a/1068870
+    
+    //FIXME: "undefined reference to log10 and floor" Why doesn't this work...?  
+    //int label_width = (int)floor(log10((double)abs(sizeof_topo()))) + 1;
+    int label_width = 1;
+    
+    printf("%p  %*u%c | %*d@%*u    %d     %s:%u",
+        node,  //%p
+        label_width,  //%*u
+        node->destination,  //%*u
+        ((node == this)?  //%c
            ('*')
-           :((node->fd_neighbor == 0)?
+           :((node->neighbor == 0)?
               (' ')
               :('-')
             )
         ),
-        (int)floor(log10(abs((float)MAX_DISTANCE))) + 1, //from https://stackoverflow.com/a/1068870
-        node->distance,
-        (node->next_hop == 0)?('?'):(node->next_hop),
-        (time(NULL) - node->last_updated),
-        inet_ntoa(node->destaddr.sin_addr),
-        ntohs(node->destaddr.sin_port)
+        max_distance_width,  //%*d
+        node->distance,  //%*d
+        label_width, //(int)floor(log10(abs((float)sizeof_topo()))) + 1,  //%*u
+        (node->next_hop == 0)?(0):(node->next_hop),  //%*u
+        (time(NULL) - node->last_updated),  //%d
+        inet_ntoa(node->destaddr.sin_addr),  //%s
+        ntohs(node->destaddr.sin_port)  //%u
     );
 }
 
@@ -292,15 +301,15 @@ void print_topo()
 {
     if (!topo) return;
     
-    printf("----------------Topography-------------------\n");
-    printf("Node          | Dist     Time   IP\n");
-    printf("---------------------------------------------\n");
+    printf("------------------Topography--------------------\n");
+    printf("Node            | Dist     Time   IP\n");
+    printf("------------------------------------------------\n");
     
     for (int i = 0; topo[i]; i++) {
         print_node(topo[i]);
         printf("\n");
     }
-    printf("---------------------------------------------\n\n");
+    printf("------------------------------------------------\n\n");
 }
 
 void free_topo()
@@ -351,6 +360,8 @@ int is_valid_route(node__t *node)
 
 void create_route_packet(int signo)
 {
+    printf("create_route_packet() started!\n");
+    
     int num_routes = 0;
     packet__t *p_routes;
     entry__t *p_entries;
@@ -366,10 +377,10 @@ void create_route_packet(int signo)
     p_routes = new_packet(num_routes);
     entry__t *entries = (entry__t*) &(p_routes->entries);
     
-    //fill in packet entries
+    //fill in packet entries 
     for (int i = 0; topo[i]; i++) {
         if (is_valid_route(topo[i])) {
-            entries->addr = topo[i]->nickname;
+            entries->addr = topo[i]->destination;
             entries->distance = topo[i]->distance;
             entries++;
         }
@@ -394,16 +405,16 @@ void create_route_packet(int signo)
 void send_routes(packet__t *p_routes)
 {
     for (int i = 0; topo[i]; i++) {
-        if (topo[i]->fd_neighbor) {
-            printf("  send_routes(): sending to %s:%u\n", 
+        if (topo[i]->neighbor) {
+            printf("  send_routes(): sending to %s:%u\n",
                     inet_ntoa(topo[i]->destaddr.sin_addr),
                     ntohs(topo[i]->destaddr.sin_port)
                    );
             
-            Sendto(topo[i]->fd_neighbor, 
-                   p_routes, 
-                   sizeof_packet(p_routes), 
-                   0, 
+            Sendto(incfd,
+                   p_routes,
+                   sizeof_packet(p_routes),
+                   0,
                    (SA *) &(topo[i]->destaddr),
                    sizeof(topo[i]->destaddr)
                   );
