@@ -87,6 +87,7 @@ int main(int argc, char **argv)
     timer_start(&tmr_check_dead_routes, DEAD_ROUTE, check_route_validity);
     
     for (;;) {
+        
         len = sizeof(incaddr);
         
         tv_init(&tv);
@@ -140,6 +141,9 @@ int main(int argc, char **argv)
         //printf("  ...checking timers\n");
         timer_check(&tmr_send_routes);
         timer_check(&tmr_check_dead_routes);
+        
+        
+        print_topo();
     }
     
     free_topo();
@@ -297,11 +301,10 @@ void print_node(node__t *node)
     
     
     int max_distance_width = (int)floor(log10((double)abs(MAX_DISTANCE))) + 1; //from https://stackoverflow.com/a/1068870
-     
     int label_width = (int)floor(log10((double)abs(sizeof_topo()))) + 1;
-    //int label_width = 1;
+    int time_width = (int)floor(log10((double)abs(DEAD_ROUTE))) + 1;
     
-    printf("%p  %*u%c | %*d@%*u    %d     %s:%u",
+    printf("%p  %*u%c | %*d@%*u    %*u     %s:%u",
         node,  //%p
         label_width,  //%*u
         node->destination,  //%*u
@@ -316,7 +319,8 @@ void print_node(node__t *node)
         node->distance,  //%*d
         label_width, //(int)floor(log10(abs((float)sizeof_topo()))) + 1,  //%*u
         (node->next_hop == 0)?(0):(node->next_hop),  //%*u
-        (time(NULL) - node->last_updated),  //%d
+        time_width,
+        (time(NULL) - node->last_updated),  //%*u
         inet_ntoa(node->destaddr.sin_addr),  //%s
         ntohs(node->destaddr.sin_port)  //%u
     );
@@ -334,7 +338,7 @@ void print_topo()
         print_node(topo[i]);
         printf("\n");
     }
-    printf("------------------------------------------------\n\n");
+    printf("------------------------------------------------\n\n\n\n\n");
 }
 
 void free_topo()
@@ -449,14 +453,20 @@ void check_route_validity(time_t now)
     for (int i = 0; topo[i]; i++) {
         if (topo[i] == this) {
             topo[i]->last_updated = time(NULL);
-        } else if(time(NULL) - topo[i]->last_updated > DEAD_ROUTE) {
+        } else if (time(NULL) - topo[i]->last_updated > DEAD_ROUTE) {
             topo[i]->next_hop = 0;
             topo[i]->last_updated = time(NULL);
         }
     }
     
+    for (int i = 0; topo[i]; i++) {
+        if ((DEAD_ROUTE - (time(NULL) - topo[i]->last_updated)) < next_death) {
+            next_death = (DEAD_ROUTE - (time(NULL) - topo[i]->last_updated));
+        }
+    }
+    
     //TODO: check_dead_routes should figure out when the next one will be invalid, not a const
-    timer_start(&tmr_check_dead_routes, next_death, check_route_validity);
+    timer_start(&tmr_check_dead_routes, next_death + 1, check_route_validity);
 }
 
 node__t *is_neighbor(struct sockaddr_in addr)
@@ -487,7 +497,4 @@ void update_routes(packet__t *p_recv, node__t *sender)
             node->last_updated = time(NULL);
         } 
     }
-    
-    print_topo();
-    printf("\n\n\n\n");
 }
