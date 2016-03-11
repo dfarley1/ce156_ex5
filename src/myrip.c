@@ -44,17 +44,18 @@ mytimer_t tmr_check_dead_routes = TIMER_INIT;
 
 void parse_node_config(char *nodefp);
 void parse_neighbor_config(char *neighborfp);
-node__t *get_node(char nick);
+node__t *get_node(uint32_t nick);
 int sizeof_topo();
 void print_node(node__t *node);
 void print_topo();
 void free_topo();
 packet__t *new_packet(int num_entries);
 int sizeof_packet(packet__t *pkt);
-int is_valid_route(node__t *node);
 void create_route_packet(time_t now);
 void send_routes(packet__t *p_routes);
 void check_route_validity(time_t now);
+node__t *is_neighbor(struct sockaddr_in addr);
+void update_routes(packet__t *p_recv, node__t *sender);
 
 int main(int argc, char **argv)
 {
@@ -101,9 +102,8 @@ int main(int argc, char **argv)
             err_quit("select() < 0, strerror(errno) = %s\n", strerror(errno));
         }
         
-        //TODO: check for packet arrival?
+        //check for packet arrival
         if (FD_ISSET(sockfd, &rset)) {
-            printf("sockfd set\n");
             n = recvfrom(sockfd,
                          p_recv,  //header -  pkt->entries   +        N       *     entries
                          sizeof(packet__t) - sizeof(uint8_t) + (sizeof_topo() * sizeof(entry__t)),
@@ -119,14 +119,18 @@ int main(int argc, char **argv)
                 //What do?
             } else {
                 //If the packet isn't from a neighbor then we don't care
-                
-                //TODO: do things with the packet
-                printf("got packet with %d entries from %s:%u\n", 
+                node__t *sender;
+                if ((sender = is_neighbor(incaddr)) != NULL) {
+                    //TODO: do things with the packet
+                    printf("got packet with %d entries from %s:%u\n", 
                         p_recv->num_entries, 
                         inet_ntoa(incaddr.sin_addr),
                         ntohs(incaddr.sin_port)
-                       );
-                
+                    );
+                    update_routes(p_recv, sender);
+                } else {
+                    printf("got packet from a non-neighbor, ignoring.\n");
+                }
                 
             }
             free(p_recv);
@@ -254,11 +258,11 @@ void parse_neighbor_config(char *neighborfp)
         
         if (from == this->destination) {
             get_node(to)->distance = dist;
-            get_node(to)->next_hop = to;
+            //get_node(to)->next_hop = to;
             get_node(to)->neighbor = 1;
         } else if (to == this->destination) {
             get_node(from)->distance = dist;
-            get_node(from)->next_hop = from;
+            //get_node(from)->next_hop = from;
             get_node(from)->neighbor = 1;
         }
     }
@@ -266,7 +270,7 @@ void parse_neighbor_config(char *neighborfp)
     //print_neighbors();
 }
 
-node__t *get_node(char nick)
+node__t *get_node(uint32_t nick)
 {
     for (int i = 0; topo[i]; i++) {
         if (topo[i]->destination == nick) {
@@ -370,15 +374,6 @@ int sizeof_packet(packet__t *pkt)
            );
 }
 
-int is_valid_route(node__t *node)
-{
-    return (
-            (node->next_hop != 0) 
-            && (time(NULL) - node->last_updated <= DEAD_ROUTE)
-            //&& (node != this)  //TODO: No need for a special case when parsing routes?
-           );
-}
-
 void create_route_packet(time_t now)
 {
     printf("create_route_packet() started: %u\n", time(NULL));
@@ -389,7 +384,7 @@ void create_route_packet(time_t now)
     
     //how big is our packet?
     for (int i = 0; topo[i]; i++) {
-        if (is_valid_route(topo[i])) {
+        if (topo[i]->next_hop != 0) {
             num_routes++;
         }
     }
@@ -400,7 +395,7 @@ void create_route_packet(time_t now)
     
     //fill in packet entries 
     for (int i = 0; topo[i]; i++) {
-        if (is_valid_route(topo[i])) {
+        if (topo[i]->next_hop != 0) {
             entries->addr = topo[i]->destination;
             entries->distance = topo[i]->distance;
             entries++;
@@ -415,9 +410,9 @@ void create_route_packet(time_t now)
     }
     
     //send packet to neighbors
-    //if (p_routes->num_entries > 0) { TODO
+    if (p_routes->num_entries > 0) {
         send_routes(p_routes);
-    //}
+    }
     free(p_routes);
     
     //reset timer
@@ -428,11 +423,12 @@ void send_routes(packet__t *p_routes)
 {
     for (int i = 0; topo[i]; i++) {
         if (topo[i]->neighbor) {
+            /*
             printf("  send_routes(): sending to %s:%u\n",
                     inet_ntoa(topo[i]->destaddr.sin_addr),
                     ntohs(topo[i]->destaddr.sin_port)
                    );
-            
+            */
             Sendto(sockfd,
                    p_routes,
                    sizeof_packet(p_routes),
@@ -446,10 +442,52 @@ void send_routes(packet__t *p_routes)
 
 void check_route_validity(time_t now)
 {
-    printf("\n\n\n\ncheck_route_validity() started: %u\n\n\n\n", time(NULL));
+    printf("check_route_validity() started: %u\n", time(NULL));
     
-    //TODO:timer for each 
+    int next_death = DEAD_ROUTE;
+    
+    for (int i = 0; topo[i]; i++) {
+        if (topo[i] == this) {
+            topo[i]->last_updated = time(NULL);
+        } else if(time(NULL) - topo[i]->last_updated > DEAD_ROUTE) {
+            topo[i]->next_hop = 0;
+            topo[i]->last_updated = time(NULL);
+        }
+    }
     
     //TODO: check_dead_routes should figure out when the next one will be invalid, not a const
-    timer_start(&tmr_check_dead_routes, DEAD_ROUTE, check_route_validity);
+    timer_start(&tmr_check_dead_routes, next_death, check_route_validity);
+}
+
+node__t *is_neighbor(struct sockaddr_in addr)
+{
+    for (int i = 0; topo[i]; i++) {
+        if ((topo[i]->destaddr.sin_addr.s_addr == addr.sin_addr.s_addr) 
+                && (topo[i]->destaddr.sin_port == addr.sin_port)) {
+            return topo[i];
+        }
+    }
+    return NULL;
+}
+
+void update_routes(packet__t *p_recv, node__t *sender)
+{
+    entry__t *entries = (entry__t*) &(p_recv->entries);
+    for (int i = 0; i < p_recv->num_entries; i++) {
+        node__t *node = get_node(entries[i].addr);
+        
+        printf("  entries[%d]: old_dist=%d, new_dist=%d via %d\n", i, node->distance, (entries[i].distance + sender->distance), sender->destination);
+        
+        if ((entries[i].distance + sender->distance) <= node->distance) {
+            node->distance = (entries[i].distance + sender->distance);
+            node->distance = (node->distance > MAX_DISTANCE)?(MAX_DISTANCE):(node->distance);
+            
+            node->next_hop = sender->destination;
+        
+            node->last_updated = time(NULL);
+        } 
+    }
+    
+    print_topo();
+    printf("\n\n\n\n");
 }
