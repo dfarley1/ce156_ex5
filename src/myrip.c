@@ -1,6 +1,5 @@
 /*
  * Daniel Farley - dfarley@ucsc.edu
- * CE 156 - Programing Assignment 5
  * Usage: ./myrip <node.config> <neightbor.config> <local_port>
  */
 
