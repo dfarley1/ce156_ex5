@@ -1,7 +1,7 @@
 # File:         Makefile
 # Author:       Kerry Veenstra
 #
-# Purpose:      This is the base Makefile for CMPE 156 Assignments.
+# Purpose:      This is the base Makefile
 #
 #               You can edit this Makefile as necessary.
 #               This Makefile expects the following directory structure:
